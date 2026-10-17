@@ -16,7 +16,7 @@ with st.sidebar:
     costo_mxn = costo*18.5 if moneda=="USD" else costo
 
 if not gemini_key:
-    st.warning("Pon tu Gemini Key. Arriba a la izq >>")
+    st.warning("Pon tu Gemini Key. >> arriba a la izq")
     st.stop()
 
 foto = st.camera_input("1️⃣ Toma foto")
@@ -28,31 +28,16 @@ if imagen_file:
     st.image(img, use_container_width=True)
     
     if st.button("🚀 IDENTIFICAR Y ANALIZAR", type="primary", use_container_width=True):
-        with st.spinner("Identificando con el modelo disponible..."):
+        with st.spinner("Identificando con gemini-3.8-flash..."):
             try:
                 buffered = io.BytesIO()
                 img.save(buffered, format="JPEG")
                 img_b64 = base64.b64encode(buffered.getvalue()).decode()
 
-                # 1. PREGUNTARLE A GOOGLE QUÉ MODELOS HAY
-                list_url = f"https://generativelanguage.googleapis.com/v1/models?key={gemini_key}"
-                models_resp = requests.get(list_url, timeout=15).json()
-                models = models_resp.get('models', [])
+                # MODELO NUEVO PARA CUENTAS NUEVAS
+                modelo = "models/gemini-3.8-flash"
+                url = f"https://generativelanguage.googleapis.com/v1/{modelo}:generateContent?key={gemini_key}"
                 
-                # Buscar el primer modelo flash que soporte generateContent
-                modelo_elegido = None
-                for m in models:
-                    if 'flash' in m['name'].lower() and 'generateContent' in str(m.get('supportedGenerationMethods',[])):
-                        modelo_elegido = m['name']
-                        break
-                # Fallback si no encuentra
-                if not modelo_elegido:
-                    # intenta con los nombres más comunes en v1
-                    modelo_elegido = "models/gemini-2.5-flash"
-
-                st.caption(f"Usando: {modelo_elegido}")
-
-                url = f"https://generativelanguage.googleapis.com/v1/{modelo_elegido}:generateContent?key={gemini_key}"
                 payload = {
                     "contents": [{"parts": [
                         {"text": "Identifica producto. SOLO MARCA + PRODUCTO + TAMAÑO. Ej: Ariel 5kg. Max 5 palabras."},
@@ -63,8 +48,8 @@ if imagen_file:
                 data = r.json()
 
                 if 'candidates' not in data:
-                    st.error("Error Google")
                     st.json(data)
+                    st.error("Error Google, revisa el JSON arriba")
                     st.stop()
                     
                 producto = data['candidates'][0]['content']['parts'][0]['text'].strip()
@@ -74,15 +59,16 @@ if imagen_file:
                 st.divider()
                 st.subheader(f"Mercado Libre: {producto}")
                 ml = requests.get(f"https://api.mercadolibre.com/sites/MLM/search?q={q}&limit=5", timeout=15).json()
+                st.metric("Vendedores", len(ml.get('results',[])))
                 for item in ml.get('results', [])[:3]:
                     with st.container(border=True):
                         st.write(f"**{item['title'][:90]}**")
-                        c1,c2,c3 = st.columns(3)
+                        c1,c2 = st.columns(2)
                         c1.metric("Precio", f"${item['price']}")
                         c2.metric("Vendidos", item.get('sold_quantity',0))
                         if costo_mxn>0:
-                            c3.metric("Ganancia", f"${item['price']*0.84 - costo_mxn:.0f}")
-                        st.link_button("Ver", item['permalink'])
+                            st.write(f"Tu ganancia: ${item['price']*0.84 - costo_mxn:.0f}")
+                        st.link_button("Ver en ML", item['permalink'])
 
                 st.divider()
                 st.link_button(f"Amazon: {producto}", f"https://www.amazon.com.mx/s?k={q}", use_container_width=True)
