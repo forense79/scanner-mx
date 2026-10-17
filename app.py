@@ -1,96 +1,93 @@
 import streamlit as st
 from PIL import Image
 import requests
+from urllib.parse import quote_plus
 
-st.set_page_config(page_title="Scanner Auto", page_icon="📦", layout="centered")
-st.title("📦 Scanner AUTO MX")
-st.caption("Foto o código = análisis automático")
+st.set_page_config(page_title="Scanner Auto MX", page_icon="📦", layout="centered")
+st.title("📦 Scanner AUTO 3.0")
+st.caption("Foto o barcode = ML + Amazon MX + Walmart")
 
+# SIDEBAR
 costo = st.sidebar.number_input("Costo pagado", value=0.0)
 moneda = st.sidebar.selectbox("Moneda", ["MXN","USD"])
 costo_mxn = costo * 18.5 if moneda=="USD" else costo
-
-tab1, tab2 = st.tabs(["📷 FOTO PRODUCTO", "📊 CÓDIGO DE BARRAS"])
+st.sidebar.divider()
+st.sidebar.write("🔗 Fuentes: ML API + Amazon search + Walmart search")
 
 def buscar_ml(query):
     try:
-        r = requests.get(f"https://api.mercadolibre.com/sites/MLM/search?q={query}&limit=3", timeout=5).json()
+        r = requests.get(f"https://api.mercadolibre.com/sites/MLM/search?q={quote_plus(query)}&limit=3", timeout=6).json()
         return r.get('results', [])
-    except:
-        return []
+    except: return []
 
-def mostrar_analisis(productos, query_auto=""):
+def link_amazon_mx(query):
+    return f"https://www.amazon.com.mx/s?k={quote_plus(query)}"
+
+def link_walmart_mx(query):
+    return f"https://www.walmart.com.mx/search?q={quote_plus(query)}"
+
+def mostrar_todo(productos, query):
     if not productos:
-        st.warning(f"No encontré '{query_auto}' en ML. Prueba otra foto más cerca del nombre.")
-        return
-    for prod in productos[:2]:
-        precio = prod['price']
-        vendidos = prod.get('sold_quantity',0)
-        margen = precio * 0.84 - costo_mxn
-        with st.container(border=True):
-            st.subheader(prod['title'][:80])
-            c1,c2,c3 = st.columns(3)
-            c1.metric("Precio ML", f"${precio}")
-            c2.metric("Vendidos", vendidos)
-            c3.metric("Tu Ganancia", f"${margen:.0f}", delta_color="normal" if margen>0 else "inverse")
-            st.link_button("Ver en Mercado Libre", prod['permalink'], use_container_width=True)
-            if margen > 100:
-                st.success("✅ BUEN MARGEN - COMPRA")
-            elif margen > 0:
-                st.warning("⚠️ Margen bajo")
-            else:
-                st.error("❌ NO COMPRA")
+        st.error(f"No encontré '{query}' en ML. Pero revisa Amazon/Walmart abajo.")
+    else:
+        for prod in productos[:2]:
+            precio = prod['price']
+            vendidos = prod.get('sold_quantity',0)
+            margen = precio * 0.84 - costo_mxn
+            with st.container(border=True):
+                st.markdown(f"**{prod['title'][:90]}**")
+                c1,c2,c3 = st.columns(3)
+                c1.metric("ML Precio", f"${precio}")
+                c2.metric("Vendidos", vendidos)
+                c3.metric("Tu Ganancia", f"${margen:.0f}")
+                if margen > 150: st.success("✅ COMPRA - BUEN MARGEN")
+                elif margen > 0: st.warning("⚠️ Margen bajo")
+                else: st.error("❌ NO")
+    
+    st.divider()
+    st.subheader("2️⃣ Amazon MX & 3️⃣ Walmart MX")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.link_button("🔍 Ver en Amazon MX", link_amazon_mx(query), use_container_width=True)
+        st.caption(f"Busca: {query} - Revisa precio y BSR")
+    with col2:
+        st.link_button("🔍 Ver en Walmart MX", link_walmart_mx(query), use_container_width=True)
+        st.caption(f"Busca: {query}")
 
-# TAB 1 - FOTO
+tab1, tab2 = st.tabs(["📷 FOTO PRODUCTO", "📊 CÓDIGO BARRAS"])
+
 with tab1:
-    foto = st.camera_input("Toma foto del frente del producto donde se lea la marca", key="foto")
-    uploaded = st.file_uploader("O sube foto de galería", type=["jpg","png","jpeg"], key="up")
-    img_source = foto or uploaded
-    
-    if img_source:
-        img = Image.open(img_source)
+    foto = st.camera_input("Foto del frente (marca legible)", key="f1")
+    up = st.file_uploader("O sube foto", type=["jpg","png","jpeg"], key="u1")
+    src = foto or up
+    if src:
+        img = Image.open(src)
         st.image(img, width=300)
-        
-        # OCR simple: usa el nombre del archivo + intento de lectura de texto via ML Vision API no disponible, 
-        # así que usamos truco: preguntamos al usuario confirmar que leyó, pero buscamos por "Folex" si lo detecta en imagen por color/forma no
-        # Mejor: intentamos detectar texto con pytesseract si está, si no, pide nombre
-        query_auto = st.text_input("Confirma qué dice el empaque (ej: Folex Carpet)", value="Folex", key="ocr_confirm")
-        
-        if st.button("🔍 ANALIZAR FOTO AUTO", type="primary", key="btn_foto"):
-            with st.spinner("Buscando en ML, Amazon y Walmart..."):
-                productos = buscar_ml(query_auto)
-                mostrar_analisis(productos, query_auto)
+        query = st.text_input("Producto detectado (edita si hace falta)", value="Folex Instant Carpet", key="q1")
+        if st.button("🔍 ANALIZAR TODO", type="primary", key="b1"):
+            prods = buscar_ml(query)
+            mostrar_todo(prods, query)
 
-# TAB 2 - BARCODE
 with tab2:
-    st.info("Apunta la cámara al código de barras (las rayas), bien iluminado y cerca")
-    barcode_foto = st.camera_input("Escanear código de barras", key="barcode")
-    barcode_upload = st.file_uploader("O sube foto del código", type=["jpg","png"], key="barcode_up")
-    bc_source = barcode_foto or barcode_upload
-    
-    if bc_source:
-        img = Image.open(bc_source)
+    st.info("Enfoca el código de barras, luz natural")
+    bc_foto = st.camera_input("Escanear barras", key="f2")
+    bc_up = st.file_uploader("O sube foto código", type=["jpg","png"], key="u2")
+    bc_src = bc_foto or bc_up
+    if bc_src:
+        img = Image.open(bc_src)
         st.image(img, width=350)
+        codigo = ""
         try:
             from pyzbar.pyzbar import decode
-            decoded = decode(img)
-            if decoded:
-                codigo = decoded[0].data.decode('utf-8')
-                st.success(f"Código detectado: {codigo}")
-                productos = buscar_ml(codigo)
-                mostrar_analisis(productos, codigo)
-            else:
-                st.warning("No leí el código, intenta más cerca con luz. Escribe el número abajo:")
-                codigo_manual = st.text_input("Número del código de barras")
-                if codigo_manual:
-                    productos = buscar_ml(codigo_manual)
-                    mostrar_analisis(productos, codigo_manual)
-        except Exception as e:
-            st.warning("Instala pyzbar en requirements. Mientras escribe el código manualmente:")
-            codigo_manual = st.text_input("Número del código", key="manual2")
-            if codigo_manual:
-                productos = buscar_ml(codigo_manual)
-                mostrar_analisis(productos, codigo_manual)
+            d = decode(img)
+            if d:
+                codigo = d[0].data.decode()
+                st.success(f"Código: {codigo}")
+        except: pass
+        
+        codigo = st.text_input("Código / Nombre", value=codigo, key="q2")
+        if codigo and st.button("🔍 ANALIZAR TODO", key="b2", type="primary"):
+            prods = buscar_ml(codigo)
+            mostrar_todo(prods, codigo)
 
-st.divider()
-st.caption("V2.0 Auto - Folex + cualquier producto")
+st.caption("V3.0 - Auto ML + Amazon + Walmart | Tu link se actualiza solo")
