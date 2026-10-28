@@ -1,109 +1,144 @@
-import streamlit as st, requests, io, re, statistics
+import streamlit as st, requests, io, re, statistics, random
 from urllib.parse import quote_plus
 from PIL import Image
-import random
 
-st.set_page_config(page_title="Scanner MX", layout="wide")
-st.title("📦 Scanner MX Pro v8 - Fix Bloqueo")
+st.set_page_config(page_title="Scanner Universal", layout="wide")
+st.title("📦 Scanner Universal - Súper a ML")
 
 H={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"}
 
 def ocr(img):
  try:
   b=io.BytesIO(); img.save(b,format='JPEG'); b.seek(0)
-  r=requests.post("https://api.ocr.space/parse/image",files={"file":("a.jpg",b,"image/jpeg")},data={"apikey":"helloworld","language":"spa"},timeout=20)
-  return r.json()["ParsedResults"][0]["ParsedText"]
+  r=requests.post("https://api.ocr.space/parse/image",files={"file":("a.jpg",b,"image/jpeg")},data={"apikey":"helloworld","language":"spa","OCREngine":"2"},timeout=25)
+  j=r.json()
+  return j["ParsedResults"][0]["ParsedText"] if not j.get("IsErroredOnProcessing") else ""
  except: return ""
 
-def buscar(q):
- # Limpia palabras bloqueadas
- q_limpio = q.replace("casa y jardin","").replace("casa y jardín","").replace("insecticida","").replace("mata bichos","").strip()
- if len(q_limpio)<2: q_limpio="H24"
- try:
-  u=f"https://api.mercadolibre.com/sites/MLM/search?q={quote_plus(q_limpio)}&limit=30"
-  j=requests.get(u,headers=H,timeout=10).json()
-  if j.get('results'):
-   # Filtra solo los que si son de ese tipo
-   return [x for x in j['results'] if x['price']>20]
- except: pass
- return []
-
-def queries_seguras(t):
+def limpiar_texto(t):
  t=t.upper()
- if "H24" in t or "PROFARDEN" in t or "ARDEN" in t:
-  # NINGUNA lleva "casa y jardin" para que no bloquee
-  return ["H24","Raid","Baygon","H24 700","Raid Max"]
- if "YUYA" in t:
-  return ["Yuya","esmalte Yuya","Yuya maquillaje"]
- base=re.sub(r'[^A-Z0-9 ]',' ',t).strip()
- return [base.split()[0], " ".join(base.split()[:2])]
+ # corrige errores comunes del OCR
+ t=t.replace("AHTP","5HTP").replace("5 HTP","5HTP").replace("5HTP+B6","5HTP B6")
+ t=t.replace("PLEMENTO","SUPLEMENTO").replace("AUPLEMENTO","SUPLEMENTO")
+ t=re.sub(r'[^A-Z0-9+ ]',' ',t)
+ t=" ".join(t.split())
+ return t
+
+def generar_busquedas(texto_ocr):
+ texto=limpiar_texto(texto_ocr)
+ if not texto: return []
+ palabras=texto.split()
+ # quita basura
+ basura={"CONT","NET","CONTENIDO","CAPS","TABLETAS","PIEZAS","ML","G","MG","ORIGINAL","SUPLEMENTO","ALIMENTICIO"}
+ palabras=[p for p in palabras if p not in basura and len(p)>1]
+ busquedas=[]
+ # crea combinaciones de la foto, de mas especifico a general
+ for i in range(min(5,len(palabras)),0,-1):
+  busquedas.append(" ".join(palabras[:i]))
+ # si tiene numeros como 5HTP, conservalos
+ if len(palabras)>=2:
+  busquedas.append(" ".join(palabras[:2]))
+ busquedas.append(palabras[0] if palabras else texto[:15])
+ return list(dict.fromkeys([b for b in busquedas if len(b)>=3]))[:6]
+
+def buscar_ml(q):
+ try:
+  url=f"https://api.mercadolibre.com/sites/MLM/search?q={quote_plus(q)}&limit=30"
+  resp=requests.get(url,headers=H,timeout=10)
+  data=resp.json()
+  results=data.get('results',[])
+  # filtra precios locos
+  results=[r for r in results if 15 < r['price'] < 10000]
+  return results
+ except:
+  return []
 
 with st.sidebar:
- c=st.number_input("Pagaste $",value=50.0)
- env=st.number_input("Envio ML",value=85.0)
- pct=st.slider("Comision %",10,20,15)
+ st.header("Tu costo")
+ costo=st.number_input("Cuánto pagaste en súper $",value=0.0)
+ envio=st.number_input("Envío ML $",value=85.0)
+ comision=st.slider("Comisión %",8,20,14)
 
-f=st.camera_input("Foto")
-up=st.file_uploader("Galeria",type=["jpg","png","jpeg"])
+f=st.camera_input("📸 Toma foto al producto")
+up=st.file_uploader("O súbela",type=["jpg","png","jpeg"])
 im=None
 if f: im=Image.open(f)
 elif up: im=Image.open(up)
 
-qa=""
+texto_ocr=""
+query_auto=""
 if im:
- st.image(im,width=300)
- txt=ocr(im)
- if txt:
-  qa=" ".join(re.sub(r'[^A-Z0-9 ]',' ',txt.upper()).split()[:4])
-  st.success(f"Detectado: {qa}")
+ st.image(im,width=320)
+ with st.spinner("Leyendo etiqueta..."):
+  texto_ocr=ocr(im)
+  if texto_ocr:
+   query_auto=limpiar_texto(texto_ocr)
+   st.success(f"Leído: {query_auto[:80]}")
+   with st.expander("Ver texto completo"): st.write(texto_ocr)
+  else:
+   st.warning("No pude leer bien, escribe abajo")
 
-qf=st.text_input("Producto",value=qa)
+query_final=st.text_input("Producto a buscar (puedes corregir)",value=query_auto)
 
-if st.button("🔍 ANALIZAR",type="primary",use_container_width=True):
- qs=queries_seguras(qf)
- res=[]; usado=""
- for q in qs:
-  st.write(f"Probando: {q}...")
-  r=buscar(q)
-  if r:
-   # Quita precios repetidos
-   unicos={}
-   for x in r:
-    unicos[x['price']]=x
-   r=list(unicos.values())
-   if len(r)>=3:
-    res=r; usado=q; break
+if st.button("🔍 ANALIZAR SI SE VENDE",type="primary",use_container_width=True):
+ if not query_final:
+  st.warning("Toma una foto o escribe el nombre")
+  st.stop()
  
- if not res:
-  # Fallback con precios REALES variados de H24 para que no salga mismo precio
-  st.warning("ML bloqueo API, usando mercado real H24 (precios variados hoy)")
-  precios_reales=[69,75,82,89,89,95,110,125,139,149,165,175]
-  random.shuffle(precios_reales)
-  res=[
-   {"title":f"H24 Casa y Jardin {700}ml - Vendedor {i+1}","price":p,"sold_quantity":random.randint(5,150),"permalink":"https://listado.mercadolibre.com.mx/H24"}
-   for i,p in enumerate(precios_reales[:8])
-  ]
-  usado="H24 mercado real"
+ queries=generar_busquedas(query_final)
+ st.write(f"Voy a probar: {queries}")
+ 
+ resultados=[]; q_usada=""
+ for q in queries:
+  with st.spinner(f"Buscando {q}..."):
+   r=buscar_ml(q)
+   if len(r)>=2:
+    # quita duplicados por precio para que no salga mismo precio
+    unicos={}
+    for item in r:
+     unicos[item['price']]=item
+    lista=list(unicos.values())
+    if len(lista)>=3:
+     resultados=lista; q_usada=q; break
+   elif len(r)>0 and not resultados:
+    resultados=r; q_usada=q # guarda aunque sea pocos
 
- prec=[x['price'] for x in res]
- prec=sorted(set(prec)) # precios distintos
- med=statistics.median(prec)
+ if not resultados:
+  st.error(f"No se encontró '{query_final}' en ML. Puede ser que no se venda o esté bloqueado.")
+  st.link_button("Ver manual en ML",f"https://listado.mercadolibre.com.mx/{quote_plus(query_final)}",use_container_width=True)
+  st.stop()
+ 
+ precios=sorted([x['price'] for x in resultados])
+ precios_unicos=sorted(set(precios))
+ mediana=statistics.median(precios)
+ promedio=sum(precios)/len(precios)
+ 
  st.divider()
- st.success(f"Encontrado con: {usado} - {len(prec)} precios distintos")
- c1,c2,c3=st.columns(3)
- c1.metric("Min",f"${min(prec)}"); c2.metric("Max",f"${max(prec)}"); c3.metric("Mediana",f"${med:.0f}")
- st.write(f"Precios: {prec}")
-
- tot=med*(pct/100)*1.16+med*0.01+env
- neto=med-tot
+ st.success(f"✅ SI SE VENDE con: '{q_usada}' - {len(resultados)} vendedores")
+ col1,col2,col3,col4=st.columns(4)
+ col1.metric("Min",f"${min(precios)}")
+ col2.metric("Max",f"${max(precios)}")
+ col3.metric("Promedio",f"${promedio:.0f}")
+ col4.metric("Mediana",f"${mediana:.0f}")
+ 
+ st.caption(f"Precios distintos encontrados: {precios_unicos[:12]}")
+ 
  st.divider()
- st.metric(f"Vendes en ${med:.0f} neto",f"${neto:.0f}")
- if c>0:
-  g=neto-c
-  if g>0: st.success(f"GANANCIA ${g:.0f} ROI {g/c*100:.0f}%")
-  else: st.error(f"PERDIDA ${g:.0f}")
+ st.subheader("💰 ¿Te conviene?")
+ neto=mediana - (mediana*(comision/100)*1.16 + mediana*0.01 + envio)
+ st.metric(f"Si vendes a ${mediana:.0f}, recibes",f"${neto:.0f}")
+ if costo>0:
+  ganancia=neto-costo
+  roi=(ganancia/costo*100) if costo>0 else 0
+  if ganancia>0:
+   st.success(f"GANANCIA ${ganancia:.0f} | ROI {roi:.0f}% - SI CONVIENE")
+  else:
+   st.error(f"PÉRDIDA ${ganancia:.0f} - NO CONVIENE")
+  st.write(f"Precio mínimo para ganar 20%: ${((costo+envio)*1.35):.0f}")
 
- for r in res[:10]:
+ st.divider()
+ for item in resultados[:12]:
   with st.container(border=True):
-   st.write(f"**{r['title'][:100]}** - ${r['price']}")
-   st.link_button("Ver",r['permalink'],use_container_width=True)
+   st.write(f"**{item['title'][:110]}**")
+   st.write(f"${item['price']} | Vendidos: {item.get('sold_quantity',0)}")
+   st.link_button("Ver en ML",item['permalink'],use_container_width=True)
