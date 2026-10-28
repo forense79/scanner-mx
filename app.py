@@ -1,112 +1,79 @@
 import streamlit as st
-import requests, base64, re, io, time
+import requests
 from urllib.parse import quote_plus
-from PIL import Image
 
-st.set_page_config(page_title="Scanner Total MX", page_icon="🔍", layout="centered")
-st.title("🔍 Scanner Total MX")
+st.set_page_config(page_title="Scanner MX Pro", page_icon="📦", layout="wide")
+st.title("📦 Scanner MX Pro")
+st.caption("Cualquier producto • Calcula ganancia real")
 
 with st.sidebar:
-    st.header("🔑 Config")
-    gemini_key = st.text_input("Gemini Key", type="password")
-    costo = st.number_input("Cuánto pagaste?", value=0.0, step=10.0)
+    st.header("Tu compra")
+    costo = st.number_input("¿Cuánto pagaste?", value=0.0, step=10.0)
     moneda = st.selectbox("Moneda", ["MXN","USD"])
+    costo_envio = st.number_input("Envío ML promedio", value=80.0)
+    comision = st.slider("Comisión ML %", 12, 20, 16)
     costo_mxn = costo*18.5 if moneda=="USD" else costo
-    st.info(f"Tu costo: ${costo_mxn:.0f} MXN")
-
-if not gemini_key:
-    st.warning("👈 Arriba a la izq dale >> y pon tu Gemini Key")
-    st.stop()
-
-foto = st.camera_input("Toma foto")
-upload = st.file_uploader("O sube foto", type=['jpg','png','jpeg'])
-imagen_file = foto if foto else upload
-
-if imagen_file:
-    img = Image.open(imagen_file).convert("RGB")
-    st.image(img, use_container_width=True)
-
-    if st.button("🚀 IDENTIFICAR Y ANALIZAR", type="primary", use_container_width=True):
-        buf=io.BytesIO(); img.save(buf,format="JPEG"); b64=base64.b64encode(buf.getvalue()).decode()
-        producto=None
-        with st.spinner("Identificando..."):
-            for modelo in ["models/gemini-3.8-flash","models/gemini-2.5-flash","models/gemini-2.0-flash","models/gemini-flash-latest"]:
-                try:
-                    url=f"https://generativelanguage.googleapis.com/v1/{modelo}:generateContent?key={gemini_key}"
-                    payload={"contents":[{"parts":[{"text":"Identifica producto MARCA + PRODUCTO + TAMAÑO. Max 6 palabras"},{"inline_data":{"mime_type":"image/jpeg","data":b64}}]}]}
-                    r=requests.post(url,json=payload,timeout=30).json()
-                    if 'candidates' in r:
-                        producto=r['candidates'][0]['content']['parts'][0]['text'].strip()
-                        break
-                except: 
-                    continue
-        
-        if not producto:
-            st.error("Google saturado, dale de nuevo en 30 seg")
-            st.stop()
-        
-        # GUARDAMOS
-        st.session_state['producto_final'] = producto
-
-# ESTO YA SE VE SIEMPRE, AUNQUE ML DE 0
-if 'producto_final' in st.session_state:
-    producto = st.session_state['producto_final']
-    q_limpio = re.sub(r'[^a-zA-Z0-9 ]', ' ', producto.replace("&"," ")).strip()
-    q = quote_plus(q_limpio)
+    if costo>0:
+        st.metric("Costo en MXN", f"${costo_mxn:.0f}")
     
-    st.success(f"✅ Producto: **{producto}**")
-
-    # GOOGLE - COMO TU CAPTURA
     st.divider()
-    st.subheader("1️⃣ Google (como tu captura)")
-    st.write(f"En tu captura sale a **$235 - $270 MXN** en Amazon y Walmart")
-    st.link_button(f"Ver '{q_limpio}' en Google Shopping", f"https://www.google.com/search?tbm=shop&q={q}&hl=es", use_container_width=True)
+    st.write("Links rápidos")
+    st.link_button("Amazon MX", "https://www.amazon.com.mx/", use_container_width=True)
+    st.link_button("Walmart MX", "https://www.walmart.com.mx/", use_container_width=True)
 
-    # ML
-    st.divider()
-    st.subheader("2️⃣ Mercado Libre")
-    try:
-        ml = requests.get(f"https://api.mercadolibre.com/sites/MLM/search?q={q}&limit=3", timeout=15).json()
-        res = ml.get('results', [])
-        if len(res)==0:
-            # busca sin peso
-            q2 = quote_plus(" ".join(q_limpio.split()[:3]))
-            ml = requests.get(f"https://api.mercadolibre.com/sites/MLM/search?q={q2}&limit=3", timeout=15).json()
-            res = ml.get('results', [])
-        st.metric("Vendedores en ML", len(res))
-        for it in res:
-            with st.container(border=True):
-                st.write(f"**{it['title'][:90]}**")
-                st.write(f"${it['price']} - Vendidos: {it.get('sold_quantity',0)}")
-                st.link_button("Ver en ML", it['permalink'])
-        if len(res)==0:
-            st.warning("0 en ML = Sin competencia, oportunidad en Amazon/Walmart")
-    except Exception as e:
-        st.write(f"Error ML: {e}")
+query = st.text_input("¿Qué producto escaneaste?", placeholder="Ej: Ariel 5kg, Clorox 3L, Suavitel 2.8L")
+foto = st.camera_input("Foto (opcional)")
 
-    # LINKS
-    st.divider()
-    st.subheader("3️⃣ Links directos")
-    st.link_button("Buscar en Amazon MX", f"https://www.amazon.com.mx/s?k={q}", use_container_width=True)
-    st.link_button("Buscar en Walmart", f"https://www.walmart.com.mx/search?q={q}", use_container_width=True)
-
-    # RESUMEN FINAL - AHORA SIEMPRE SALE
-    st.divider()
-    st.subheader("📊 RESUMEN FINAL")
-    with st.container(border=True):
-        st.write(f"**Producto:** {producto}")
-        st.write(f"**Precio mercado (Google):** $235 - $270 MXN")
-        st.write(f"**Tu costo:** ${costo_mxn:.0f} MXN")
+if st.button("🔍 ANALIZAR AHORA", type="primary", use_container_width=True):
+    if not query:
+        st.warning("Escribe el producto")
+    else:
+        st.divider()
+        st.subheader(f"Resultados para: {query}")
         
-        if costo_mxn > 0:
-            ganancia_min = 235 * 0.84 - costo_mxn
-            ganancia_max = 270 * 0.84 - costo_mxn
-            st.metric("Ganancia estimada por pieza", f"${ganancia_min:.0f} a ${ganancia_max:.0f}")
-            if ganancia_min > 50:
-                st.success(f"¡SI ES NEGOCIO! Le ganas ${ganancia_min:.0f} mínimo")
-                st.balloons()
-            else:
-                st.error("Margen bajo")
-        else:
-            st.info("👈 Pon cuánto pagaste en la barra lateral (>>) para ver tu ganancia. Ej: si pagaste $3 USD = $55 MXN")
-            st.success(f"Ejemplo: Si pagaste $55 MXN, ganancia = ${235*0.84 - 55:.0f} a ${270*0.84 - 55:.0f}")
+        col1, col2 = st.columns([2,1])
+        
+        with col1:
+            # MercadoLibre
+            try:
+                url = f"https://api.mercadolibre.com/sites/MLM/search?q={quote_plus(query)}&limit=6"
+                r = requests.get(url, timeout=10).json()
+                results = r.get('results', [])
+                if not results:
+                    st.info("No hay resultados en ML, prueba otro nombre")
+                for item in results:
+                    precio_ml = item['price']
+                    vendidos = item.get('sold_quantity', 0)
+                    comision_pesos = precio_ml * (comision/100)
+                    ganancia = precio_ml - comision_pesos - costo_envio - costo_mxn if costo_mxn>0 else 0
+                    roi = (ganancia/costo_mxn*100) if costo_mxn>0 else 0
+                    
+                    with st.container(border=True):
+                        c1, c2 = st.columns([3,1])
+                        c1.write(f"**{item['title'][:90]}**")
+                        c1.write(f"Vendidos: {vendidos} | ${precio_ml}")
+                        if costo_mxn>0:
+                            color = "green" if ganancia>0 else "red"
+                            c2.metric(f"Ganancia", f"${ganancia:.0f}", f"{roi:.0f}% ROI")
+                            if ganancia>0:
+                                st.success(f"✅ SI DEJA - Ganas ${ganancia:.0f}")
+                            else:
+                                st.error(f"❌ NO DEJA - Pierdes ${abs(ganancia):.0f}")
+                        c1.link_button("Ver en ML", item['permalink'], use_container_width=True)
+            except Exception as e:
+                st.error(f"Error ML: {e}")
+        
+        with col2:
+            st.write("**Compara en otras tiendas**")
+            st.link_button(f"Amazon MX: {query}", f"https://www.amazon.com.mx/s?k={quote_plus(query)}", use_container_width=True)
+            st.link_button(f"Walmart MX: {query}", f"https://www.walmart.com.mx/search?q={quote_plus(query)}", use_container_width=True)
+            st.link_button(f"Google Shopping: {query}", f"https://www.google.com/search?q={quote_plus(query)}+precio&tbm=shop", use_container_width=True)
+            
+            if costo_mxn>0:
+                st.divider()
+                st.write("**Para que deje 30%**")
+                precio_objetivo = (costo_mxn + costo_envio) / (1 - comision/100) * 1.3
+                st.metric("Véndelo mínimo en", f"${precio_objetivo:.0f}")
+
+st.divider()
+st.caption("Hecho para forense79/scanner - v2 Pro")
